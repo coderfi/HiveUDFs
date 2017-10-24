@@ -1,7 +1,23 @@
 HiveUDFs
 ========
 
+# Credits
+
+Based on
+
+* [petrabarus/HiveUDFS](https://github.com/petrabarus/HiveUDFs)
+
+* [Spuul/hive-udfs](https://github.com/Spuul/hive-udfs)
+
+# 
+
 My Personal Collection of Hive UDFs
+
+The UDFs extends the [Hive GenericUDF](https://hive.apache.org/javadocs/r2.1.1/api/org/apache/hadoop/hive/ql/udf/generic/GenericUDF.html)
+base class and
+implements the appropriate [org.apache.spark.sql.api.java](https://spark.apache.org/docs/1.4.0/api/java/org/apache/spark/sql/api/java/package-summary.html).
+
+See [SnappyData CREATE FUNCTION reference](http://snappydatainc.github.io/snappydata/reference/sql_reference/create-function/)
 
 ## Compiling
 

@@ -1,10 +1,10 @@
 /**
  * GeoIP.java.
  *
- * Copyright (C) 2013 Petra Barus,
+ * Copyright (C) 2015 Daniel Muller - Spuul,
  *
- * Copyright (C) 2012 edwardcapriolo
- * https://github.com/edwardcapriolo/hive-geoip. .
+ * Copyright (C) 2013 Petra Barus,
+ * https://github.com/petrabarus/HiveUDFs
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,12 +26,30 @@
  */
 package net.petrabarus.hiveudfs;
 
-import com.maxmind.geoip.Location;
-import com.maxmind.geoip.LookupService;
-import com.maxmind.geoip.RegionName;
 import java.io.File;
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.Map;
 import java.util.HashMap;
+
+import com.maxmind.geoip2.DatabaseReader;
+import com.maxmind.geoip2.exception.GeoIp2Exception;
+import com.maxmind.geoip2.model.AnonymousIpResponse;
+import com.maxmind.geoip2.model.CityResponse;
+import com.maxmind.geoip2.model.ConnectionTypeResponse;
+import com.maxmind.geoip2.model.ConnectionTypeResponse.ConnectionType;
+import com.maxmind.geoip2.model.CountryResponse;
+import com.maxmind.geoip2.model.DomainResponse;
+import com.maxmind.geoip2.model.IspResponse;
+import com.maxmind.geoip2.record.City;
+import com.maxmind.geoip2.record.Continent;
+import com.maxmind.geoip2.record.Country;
+import com.maxmind.geoip2.record.Location;
+import com.maxmind.geoip2.record.Postal;
+import com.maxmind.geoip2.record.Subdivision;
+
 import org.apache.hadoop.hive.ql.exec.Description;
 import org.apache.hadoop.hive.ql.exec.UDFArgumentException;
 import org.apache.hadoop.hive.ql.exec.UDFArgumentLengthException;
@@ -46,45 +64,44 @@ import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectIn
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
 
+import org.apache.spark.sql.api.java.UDF3;
+
 /**
- * This is a UDF to look a property of an IP address using MaxMind GeoIP
+ * This is a UDF to look a property of an IP address using MaxMind GeoIP2
  * library.
  *
- * The function will need three arguments. <ol> <li>IP Address in long
+ * The function will need three arguments. <ol> <li>IP Address in string
  * format.</li> <li>IP attribute (e.g. COUNTRY, CITY, REGION, etc)</li>
  * <li>Database file name.</li> </ol>
  *
- * This is a derived version from https://github.com/edwardcapriolo/hive-geoip.
+ * This is a derived version from https://github.com/petrabarus/HiveUDFs.
  * (Please let me know if I need to modify the license)
  *
- * @author Petra Barus <petra.barus@gmail.com>
- * @see https://github.com/edwardcapriolo/hive-geoip
+ * @author Daniel Muller <daniel@spuul.com>
+ * @see https://github.com/petrabarus/HiveUDFs
  */
 @UDFType(deterministic = true)
 @Description(
   name = "geoip",
-value = "_FUNC_(ip,property,database) - looks a property for an IP address from"
+value = "_FUNC_(ip,attribute,database) - looks a property for an IP address from"
 + "a library loaded\n"
-+ "The GeoIP database comes separated. To load the GeoIP use ADD FILE.\n"
++ "The GeoIP2 database comes separated. To load the GeoIP2 use ADD FILE.\n"
 + "Usage:\n"
-+ " > _FUNC_(16843009, \"COUNTRY_NAME\", \"./GeoIP.dat\")")
-public class GeoIP extends GenericUDF {
-
-        public static final String COUNTRY_NAME = "COUNTRY_NAME";
-        public static final String COUNTRY_CODE = "COUNTRY_CODE";
-        public static final String AREA_CODE = "AREA_CODE";
-        public static final String CITY = "CITY";
-        public static final String DMA_CODE = "DMA_CODE";
-        public static final String LATITUDE = "LATITUDE";
-        public static final String LONGITUDE = "LONGITUDE";
-        public static final String METRO_CODE = "METRO_CODE";
-        public static final String POSTAL_CODE = "POSTAL_CODE";
-        public static final String REGION = "REGION";
-        public static final String REGION_NAME = "REGION_NAME";
-        public static final String ORG = "ORG";
-        public static final String ID = "ID";
++ " > _FUNC_(\"8.8.8.8\", \"COUNTRY_CODE\", \"./GeoIP2-Country.mmdb\")")
+public class GeoIP extends GenericUDF implements UDF3<String, String, String, String> {
+        private static final ReentrantLock LOCK = new ReentrantLock();
         private ObjectInspectorConverters.Converter[] converters;
-        private static HashMap<String, LookupService> databases = new HashMap<String, LookupService>();
+        private static final Map<String, DatabaseReader> DATABASES = new HashMap<String, DatabaseReader>();
+
+        @Override
+        public String call(String ip, String attributeName, String databaseName) {
+                try {
+                        return convertIpAddress(ip, attributeName, databaseName);
+                }
+                catch(Exception e) {
+                        return null;
+                }
+        }
 
         /**
          * Initialize this UDF.
@@ -102,37 +119,9 @@ public class GeoIP extends GenericUDF {
                         throw new UDFArgumentLengthException("_FUNC_ accepts 3 arguments. " + arguments.length
                                 + " found.");
                 }
-                for (int i = 0; i < arguments.length; i++) {
-                        if (arguments[i].getCategory() != ObjectInspector.Category.PRIMITIVE) {
-                                throw new UDFArgumentTypeException(i,
-                                        "A string argument was expected but an argument of type " + arguments[i].getTypeName()
-                                        + " was given.");
-                        }
-                }
-                //first argument can be long or string
-                PrimitiveObjectInspector.PrimitiveCategory firstParamPrimitiveCategory = ((PrimitiveObjectInspector) arguments[0])
-                        .getPrimitiveCategory();
-                if (firstParamPrimitiveCategory != PrimitiveObjectInspector.PrimitiveCategory.LONG) {
-                        throw new UDFArgumentTypeException(0,
-                                "A string or long for first argument was expected but an argument of type " + arguments[0].getTypeName()
-                                + " was given.");
-                }
-
-                for (int i = 1; i < arguments.length; i++) {
-                        PrimitiveObjectInspector.PrimitiveCategory primitiveCategory = ((PrimitiveObjectInspector) arguments[i])
-                                .getPrimitiveCategory();
-                        if (primitiveCategory != PrimitiveObjectInspector.PrimitiveCategory.STRING
-                                && primitiveCategory != PrimitiveObjectInspector.PrimitiveCategory.VOID) {
-                                throw new UDFArgumentTypeException(i,
-                                        "A string argument was expected but an argument of type " + arguments[i].getTypeName()
-                                        + " was given.");
-                        }
-                }
 
                 converters = new ObjectInspectorConverters.Converter[arguments.length];
-                converters[0] = ObjectInspectorConverters.getConverter(arguments[0],
-                        PrimitiveObjectInspectorFactory.writableLongObjectInspector);
-                for (int i = 1; i < arguments.length; i++) {
+                for (int i = 0; i < arguments.length; i++) {
                         converters[i] = ObjectInspectorConverters.getConverter(arguments[i],
                                 PrimitiveObjectInspectorFactory.writableStringObjectInspector);
                 }
@@ -151,66 +140,148 @@ public class GeoIP extends GenericUDF {
         @Override
         public Object evaluate(GenericUDF.DeferredObject[] arguments) throws HiveException {
                 assert (arguments.length == 3);
-                LongWritable ipArg = (LongWritable) converters[0].convert(arguments[0].get());
-                long ip = ipArg.get();
+                String ip = ((Text) converters[0].convert(arguments[0].get())).toString();
                 String attributeName = ((Text) converters[1].convert(arguments[1].get())).toString();
                 String databaseName = ((Text) converters[2].convert(arguments[2].get())).toString();
-                LookupService lookupService;
-                //Just in case there are more than one database filename attached.
-                //We will just assume that two file with same filename are identical.
-                if (!databases.containsKey(databaseName)) {
-                        File file = new File(databaseName);
-                        if (!file.exists()) {
-                                throw new HiveException(databaseName + " does not exist");
-                        }
-                        try {
-                                lookupService = new LookupService(file, LookupService.GEOIP_MEMORY_CACHE | LookupService.GEOIP_CHECK_CACHE);
-                                databases.put(databaseName, lookupService);
-                        } catch (IOException ex) {
-                                throw new HiveException(ex);
-                        }
-                } else {
-                        lookupService = databases.get(databaseName);
-                }
-                String retVal = "";
+
                 try {
-                        //Let's do it baby!
-                        Location location = lookupService.getLocation(ip);
-                        if (attributeName.equals(COUNTRY_NAME)) {
-                                retVal = location.countryName;
-                        } else if (attributeName.equals(COUNTRY_CODE)) {
-                                retVal = location.countryCode;
-                        } else if (attributeName.equals(AREA_CODE)) {
-                                retVal = location.area_code + "";
-                        } else if (attributeName.equals(CITY)) {
-                                retVal = location.city + "";
-                        } else if (attributeName.equals(DMA_CODE)) {
-                                retVal = location.dma_code + "";
-                        } else if (attributeName.equals(LATITUDE)) {
-                                retVal = location.latitude + "";
-                        } else if (attributeName.equals(LONGITUDE)) {
-                                retVal = location.longitude + "";
-                        } else if (attributeName.equals(METRO_CODE)) {
-                                retVal = location.metro_code + "";
-                        } else if (attributeName.equals(POSTAL_CODE)) {
-                                retVal = location.postalCode;
-                        } else if (attributeName.equals(REGION)) {
-                                retVal = location.region;
-                        } else if (attributeName.equals(REGION_NAME)) {
-                                retVal = RegionName.regionNameByCode(location.countryCode, location.region);
-                        } else if (attributeName.equals(ORG)) {
-                                retVal = lookupService.getOrg(ip);
-                        } else if (attributeName.equals(ID)) {
-                                retVal = lookupService.getID(ip) + "";
+                        String retVal = convertIpAddress(ip, attributeName, databaseName);
+                        return new Text(retVal);
+                }
+                catch(Exception e) {
+                        return null;
+                }
+                
+        }
+
+        public static String getVal(String dataType, CountryResponse response) throws IOException, GeoIp2Exception {
+                if (dataType.equals("COUNTRY_CODE") || dataType.equals("COUNTRY_NAME")) {
+                        Country country = response.getCountry();
+                        if (dataType.equals("COUNTRY_CODE")) {
+                                return country.getIsoCode();
                         }
-                } catch (Exception ex) {
-                        //This will be useful if you don't have a complete database file.
-                        return null;
+                        else {
+                                return country.getName();
+                        }
                 }
-                if (retVal == null) {
-                        return null;
+                else {
+                        throw new UnsupportedOperationException("Unable get " + dataType + " for Database Type " + response.getClass().getSimpleName());
                 }
-                return new Text(retVal);
+        }
+
+        public static String getVal(String dataType, CityResponse response) throws IOException, GeoIp2Exception {
+                if (dataType.equals("COUNTRY_CODE")
+                    || dataType.equals("COUNTRY_NAME")
+                    || dataType.equals("SUBDIVISION_NAME")
+                    || dataType.equals("SUBDIVISION_CODE")
+                    || dataType.equals("CITY")
+                    || dataType.equals("POSTAL_CODE")
+                    || dataType.equals("LONGITUDE")
+                    || dataType.equals("LATITUDE")
+                ) {
+                        if (dataType.equals("COUNTRY_CODE") || dataType.equals("COUNTRY_NAME")) {
+                                Country country = response.getCountry();
+                                if (dataType.equals("COUNTRY_CODE")) {
+                                        return country.getIsoCode();
+                                }
+                                else {
+                                        return country.getName();
+                                }
+                        }
+                        if (dataType.equals("SUBDIVISION_CODE") || dataType.equals("SUBDIVISION_NAME")) {
+                                Subdivision subdivision = response.getMostSpecificSubdivision();
+                                if (dataType.equals("SUBDIVISION_CODE")) {
+                                        return subdivision.getIsoCode();
+                                }
+                                else {
+                                        return subdivision.getName();
+                                }
+                        }
+                        if (dataType.equals("CITY")) {
+                                City city = response.getCity();
+                                return city.getName();
+                        }
+                        if (dataType.equals("POSTAL_CODE")) {
+                                Postal postal = response.getPostal();
+                                return postal.getCode();
+                        }
+                        if (dataType.equals("LONGITUDE") || dataType.equals("LATITUDE")) {
+                                Location location = response.getLocation();
+                                if (dataType.equals("LONGITUDE")) {
+                                        return location.getLongitude().toString();
+                                }
+                                else {
+                                        return location.getLatitude().toString();
+                                }
+                        }
+                        return "";
+                }
+                else {
+                        throw new UnsupportedOperationException("Unable get " + dataType + " for Database Type " + response.getClass().getSimpleName());
+                }
+        }
+
+        public static String getVal(String dataType, IspResponse response) throws IOException, GeoIp2Exception {
+                String retVal = "";
+                switch (dataType) {
+                        case "ASN":
+                                retVal = response.getAutonomousSystemNumber().toString();
+                                break;
+                        case "ASN_ORG":
+                                retVal = response.getAutonomousSystemOrganization();
+                                break;
+                        case "ISP":
+                                retVal = response.getIsp();
+                                break;
+                        case "ORG":
+                                retVal = response.getOrganization();
+                                break;
+                        default:
+                                throw new UnsupportedOperationException("Unable get " + dataType + " for Database Type " + response.getClass().getSimpleName());
+                }
+                return retVal;
+        }
+
+        public static String getVal(String dataType, AnonymousIpResponse response) throws IOException, GeoIp2Exception {
+                Boolean retVal = false;
+                switch (dataType) {
+                        case "IS_ANONYMOUS":
+                                retVal = response.isAnonymous();
+                                break;
+                        case "IS_ANONYMOUS_VPN":
+                                retVal = response.isAnonymousVpn();
+                                break;
+                        case "IS_ISP":
+                                retVal = response.isHostingProvider();
+                                break;
+                        case "IS_PUBLIC_PROXY":
+                                retVal = response.isPublicProxy();
+                                break;
+                        case "IS_TOR_EXIT_NODE":
+                                retVal = response.isTorExitNode();
+                                break;
+                        default:
+                                throw new UnsupportedOperationException("Unable get " + dataType + " for Database Type " + response.getClass().getSimpleName());
+                }
+                return retVal ? "true" : "false";
+        }
+
+        public static String getVal(String dataType, DomainResponse response) throws IOException, GeoIp2Exception {
+                if (dataType.equals("DOMAIN")) {
+                        return response.getDomain();
+                }
+                else {
+                        throw new UnsupportedOperationException("Unable get " + dataType + " for Database Type " + response.getClass().getSimpleName());
+                }
+        }
+
+        public static String getVal(String dataType, ConnectionTypeResponse response) throws IOException, GeoIp2Exception {
+                if (dataType.equals("CONNECTION")) {
+                        return response.getConnectionType().toString();
+                }
+                else {
+                        throw new UnsupportedOperationException("Unable get " + dataType + " for Database Type " + response.getClass().getSimpleName());
+                }
         }
 
         /**
@@ -223,4 +294,65 @@ public class GeoIP extends GenericUDF {
                 assert (children.length == 3);
                 return "_FUNC_( " + children[0] + ", " + children[1] + ", " + children[2] + " )";
         }
+        
+        private DatabaseReader getDatabaseReader(String databaseName) throws IOException {
+                if (DATABASES.containsKey(databaseName)) {
+                        return DATABASES.get(databaseName);
+                } else {
+                        LOCK.lock();
+                        try {
+                                // in case someone snuck in
+                                if (!DATABASES.containsKey(databaseName)) {
+                                        //Just in case there are more than one database filename attached.
+                                        //We will just assume that two file with same filename are identical.
+                                        File database = new File(databaseName);
+                        
+                                        // This creates the DatabaseReader object, which should be reused across
+                                        // lookups.
+                                        DatabaseReader reader = new DatabaseReader.Builder(database).build();
+                                        DATABASES.put(databaseName, reader);
+                                }
+                        } finally {
+                                LOCK.unlock();
+                        }
+                        
+                        return DATABASES.get(databaseName);
+                }
+        }
+
+        private String convertIpAddress(String ip, String attributeName, String databaseName) throws GeoIp2Exception, IOException {
+                DatabaseReader reader = getDatabaseReader(databaseName);
+
+                String retVal = "";
+
+                String databaseType = reader.getMetadata().getDatabaseType();
+                InetAddress ipAddress = InetAddress.getByName(ip);
+
+                switch (databaseType) {
+                        case "GeoIP2-Country":
+                        case "GeoLite2-Country":
+                                retVal = getVal(attributeName, reader.country(ipAddress));
+                                break;
+                        case "GeoIP2-City":
+                        case "GeoLite2-City":
+                                retVal = getVal(attributeName, reader.city(ipAddress));
+                                break;
+                        case "GeoIP2-Anonymous-IP":
+                                retVal = getVal(attributeName, reader.anonymousIp(ipAddress));
+                                break;
+                        case "GeoIP2-Connection-Type":
+                                retVal = getVal(attributeName, reader.connectionType(ipAddress));
+                                break;
+                        case "GeoIP2-Domain":
+                                retVal = getVal(attributeName, reader.domain(ipAddress));
+                                break;
+                        case "GeoIP2-ISP":
+                                retVal = getVal(attributeName, reader.isp(ipAddress));
+                                break;
+                        default:
+                                throw new UnsupportedOperationException("Unknown database type " + databaseType);
+                }
+                
+                return retVal;
+        }        
 }

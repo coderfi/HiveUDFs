@@ -15,6 +15,7 @@ import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
+import org.apache.spark.sql.api.java.UDF1;
 
 /**
  * This is a UDF to get keyword part from a search engine referrer URL.
@@ -34,9 +35,19 @@ value = "_FUNC_(iplong) - returns keyword part from a search engine referrer URL
 extended = "Example:\n"
 + " > SELECT _FUNC_(\"http://www.google.com/search?q=keyword+keyword\") FROM table"
 + " > keyword keyword")
-public class SearchEngineKeyword extends GenericUDF {
+public class SearchEngineKeyword extends GenericUDF implements UDF1<String, String> {
 
         private ObjectInspectorConverters.Converter converter;
+
+        @Override
+        public String call(String referer) {
+                KeywordParser kp = new KeywordParser(referer);
+                if (!kp.hasKeyword) {
+                        return null;
+                } else {
+                        return kp.getKeyword();
+                }
+        }
 
         /**
          * Initialize this UDF.
