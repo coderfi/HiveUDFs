@@ -64,8 +64,6 @@ import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectIn
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
 
-import org.apache.spark.sql.api.java.UDF3;
-
 /**
  * This is a UDF to look a property of an IP address using MaxMind GeoIP2
  * library.
@@ -88,20 +86,10 @@ value = "_FUNC_(ip,attribute,database) - looks a property for an IP address from
 + "The GeoIP2 database comes separated. To load the GeoIP2 use ADD FILE.\n"
 + "Usage:\n"
 + " > _FUNC_(\"8.8.8.8\", \"COUNTRY_CODE\", \"./GeoIP2-Country.mmdb\")")
-public class GeoIP extends GenericUDF implements UDF3<String, String, String, String> {
+public class GeoIP extends GenericUDF {
         private static final ReentrantLock LOCK = new ReentrantLock();
         private ObjectInspectorConverters.Converter[] converters;
         private static final Map<String, DatabaseReader> DATABASES = new HashMap<String, DatabaseReader>();
-
-        @Override
-        public String call(String ip, String attributeName, String databaseName) {
-                try {
-                        return convertIpAddress(ip, attributeName, databaseName);
-                }
-                catch(Exception e) {
-                        return null;
-                }
-        }
 
         /**
          * Initialize this UDF.
@@ -320,7 +308,7 @@ public class GeoIP extends GenericUDF implements UDF3<String, String, String, St
                 }
         }
 
-        private String convertIpAddress(String ip, String attributeName, String databaseName) throws GeoIp2Exception, IOException {
+        protected String convertIpAddress(String ip, String attributeName, String databaseName) throws GeoIp2Exception, IOException {
                 DatabaseReader reader = getDatabaseReader(databaseName);
 
                 String retVal = "";

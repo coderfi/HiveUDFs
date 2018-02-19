@@ -35,7 +35,6 @@ import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
-import org.apache.spark.sql.api.java.UDF1;
 
 /**
  * LongToIP is a basic UDF to translate IP in long format to string format.
@@ -55,18 +54,9 @@ value = "_FUNC_(iplong) - returns IP address in string format from long format",
 extended = "Example:\n"
 + " > SELECT _FUNC_(16843009) FROM table"
 + " > 1.1.1.1")
-public class LongToIP extends GenericUDF implements UDF1<Long, String> {
+public class LongToIP extends GenericUDF {
 
         private ObjectInspectorConverters.Converter converter;
-
-        @Override
-        public String call(Long iplong) {
-                if (iplong == null) {
-                        return null;
-                } else {
-                        return "";
-                }
-        }
 
         /**
          * Initialize this UDF.

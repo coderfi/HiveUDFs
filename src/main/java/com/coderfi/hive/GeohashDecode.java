@@ -1,4 +1,4 @@
-package com.coderfi.hiveudfs;
+package com.coderfi.hive;
 
 import static java.util.Arrays.asList;
 import java.util.List;
@@ -22,11 +22,6 @@ import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector.Pr
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorUtils;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory;
 import org.apache.hadoop.io.Text;
-import org.apache.spark.sql.api.java.UDF1;
-import org.apache.spark.sql.types.DataTypes;
-import org.apache.spark.sql.types.Metadata;
-import org.apache.spark.sql.types.StructField;
-import org.apache.spark.sql.types.StructType;
 import com.github.davidmoten.geo.GeoHash;
 import com.github.davidmoten.geo.LatLong;
 
@@ -54,24 +49,10 @@ extended = "Example:\n"
 + " > SELECT _FUNC_('9q8yyx795ryt');"
 + " > -- glatitude,glongitude"
 + " > -- 37.789063,-122.404713")
-public class GeohashDecode extends GenericUDTF implements UDF1<String, List<Double>> {
+public class GeohashDecode extends GenericUDTF {
 
-        private static StructType LatLonSchema;
         private transient Converter inputGeohash;
         private transient Object[] outputLatLon;
-
-        static {
-            List<StructField> inputFields = new ArrayList<>();
-            inputFields.add(DataTypes.createStructField("glatitude", DataTypes.DoubleType, false));
-            inputFields.add(DataTypes.createStructField("glongitude", DataTypes.DoubleType, false));
-            GeohashDecode.LatLonSchema = DataTypes.createStructType(inputFields);
-        }
-
-        @Override
-        public List<Double> call(String geohash) {
-                final LatLong ll = GeoHash.decodeHash(geohash);
-                return asList(ll.getLat(), ll.getLon());
-        }
 
         @Override
         public StructObjectInspector initialize(ObjectInspector[] arguments) throws UDFArgumentException {

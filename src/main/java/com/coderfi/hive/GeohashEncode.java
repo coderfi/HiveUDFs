@@ -1,4 +1,4 @@
-package com.coderfi.hiveudfs;
+package com.coderfi.hive;
 
 import org.apache.hadoop.hive.ql.exec.Description;
 import org.apache.hadoop.hive.ql.exec.UDFArgumentException;
@@ -17,7 +17,6 @@ import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector.Pr
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorUtils;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory;
 import org.apache.hadoop.io.Text;
-import org.apache.spark.sql.api.java.UDF3;
 import com.github.davidmoten.geo.GeoHash;
 
 /**
@@ -38,17 +37,12 @@ value = "_FUNC_(lat, lon, length) - returns the geohash with the specified preci
 extended = "Example:\n"
 + " > SELECT _FUNC_(37.789063, -122.404713, 12) FROM table"
 + " > 9q8yyx795ryt")
-public class GeohashEncode extends GenericUDF implements UDF3<Double, Double, Integer, String> {
+public class GeohashEncode extends GenericUDF {
 
         private transient PrimitiveObjectInspector inputLat;
         private transient PrimitiveObjectInspector inputLon;
         private int precision;
         private PrimitiveObjectInspector outputGeohash;
-
-        @Override
-        public String call(Double latitude, Double longitude, Integer precision) {
-                return GeoHash.encodeHash(latitude, longitude, precision);
-        }
 
         @Override
         public ObjectInspector initialize(ObjectInspector[] arguments) throws UDFArgumentException {
@@ -92,8 +86,12 @@ public class GeohashEncode extends GenericUDF implements UDF3<Double, Double, In
                 final double lat = PrimitiveObjectInspectorUtils.getDouble(olat, inputLat);
                 final double lon = PrimitiveObjectInspectorUtils.getDouble(olon, inputLon);
 
-                final String s = this.call(lat, lon, precision);
-                return new Text(s);
+                final String s = this.makeGeoHash(lat, lon, precision);
+                if (s == null) {
+                    return null;
+                } else {
+                    return new Text(s);
+                }
         }
 
         @Override
@@ -101,4 +99,12 @@ public class GeohashEncode extends GenericUDF implements UDF3<Double, Double, In
                 assert (strings.length == 1);
                 return "_FUNC_(" + strings[0] + ")";
         }
+        
+        protected String makeGeoHash(Double latitude, Double longitude, Integer precision) {
+                if (latitude < -90 || latitude > 90) {
+                    return null;
+                }
+                return GeoHash.encodeHash(latitude, longitude, precision);
+        }
+        
 }

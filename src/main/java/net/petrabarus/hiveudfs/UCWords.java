@@ -11,7 +11,6 @@ import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspectorConverters;
 import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory;
 import org.apache.hadoop.io.Text;
-import org.apache.spark.sql.api.java.UDF1;
 
 /**
  * UCWords is equivalent to PHP's ucwords().
@@ -20,14 +19,9 @@ import org.apache.spark.sql.api.java.UDF1;
  *
  * @author Petra Barus <petra.barus@gmail.com>
  */
-public class UCWords extends GenericUDF implements UDF1<String, String> {
+public class UCWords extends GenericUDF {
 
         private ObjectInspectorConverters.Converter converter;
-
-        @Override
-        public String call(String s) {
-                return WordUtils.capitalize(s);
-        }
 
         /**
          * Initialize this UDF.
